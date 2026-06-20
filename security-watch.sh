@@ -336,6 +336,26 @@ scan_watch() {
     echo "[OK] 未发现哪吒/矿机 systemd 服务"
   fi
 
+  section "3A. 明确恶意文件扫描"
+
+LEVEL1_FILES="$(find /root /opt /tmp /var/tmp /dev/shm /etc/systemd/system \
+  -maxdepth 5 \( \
+  -path '*/c3pool' -o \
+  -path '*/c3pool/*' -o \
+  -iname 'xmrig' -o \
+  -iname 'c3pool_miner.service' -o \
+  -iname '*c3pool*' \
+  \) 2>/dev/null \
+  | grep -Ev 'security-watch-quarantine|security-watch|virus-return-check|nezha-cleaner' || true)"
+
+if [ -n "$LEVEL1_FILES" ]; then
+  echo "[ALERT] 发现明确恶意挖矿文件:"
+  echo "$LEVEL1_FILES"
+  add_alert "发现明确恶意挖矿文件"
+else
+  echo "[OK] 未发现明确恶意挖矿文件"
+fi
+
   section "3. 文件残留扫描"
   OUT="$(find /opt /tmp /var/tmp /dev/shm /etc/systemd/system /root /home \
     -maxdepth 5 \( \
@@ -349,7 +369,7 @@ scan_watch() {
     -iname '*kinsing*' -o \
     -iname '*kdevtmpfsi*' \
     \) 2>/dev/null \
-    | grep -Ev 'security-watch|virus-return-check|nezha-cleaner|ir/nezha-agent-passwd|security-watch-' || true)"
+        | grep -Ev 'security-watch|virus-return-check|nezha-cleaner|ir/nezha-agent-passwd|security-watch-|security-watch-quarantine|/root/ir-nezha|/root/c3pool' || true)"
 
   if [ -n "$OUT" ]; then
     echo "[WARN] 发现可疑文件/目录残留:"

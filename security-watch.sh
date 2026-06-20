@@ -115,9 +115,19 @@ install_watch() {
   local self
   self="$(readlink -f "$0")"
 
-  cp "$self" "$APP_DIR/security-watch.sh"
-  chmod +x "$APP_DIR/security-watch.sh"
-  ln -sf "$APP_DIR/security-watch.sh" "$BIN"
+RAW_URL="https://raw.githubusercontent.com/sockc/security-watch/main/security-watch.sh"
+
+if [ -f "$0" ]; then
+  cp "$0" "$APP_DIR/security-watch.sh" 2>/dev/null || true
+fi
+
+if [ ! -s "$APP_DIR/security-watch.sh" ]; then
+  curl -fsSL "$RAW_URL" -o "$APP_DIR/security-watch.sh"
+fi
+
+chmod +x "$APP_DIR/security-watch.sh"
+ln -sf "$APP_DIR/security-watch.sh" "$BIN"
+chmod +x "$BIN" 2>/dev/null || true
 
   if [ ! -f "$CONF" ]; then
     configure

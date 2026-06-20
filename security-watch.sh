@@ -283,8 +283,10 @@ scan_watch() {
 
   local ALERT=0
   local WARN=0
+  local CLEAN=0
   local ALERT_TEXT=""
   local WARN_TEXT=""
+  local CLEAN_TEXT=""
 
   add_alert() {
     ALERT=$((ALERT + 1))
@@ -297,6 +299,42 @@ scan_watch() {
     WARN_TEXT="${WARN_TEXT}
 ⚠️ $1"
   }
+    add_clean() {
+    CLEAN=$((CLEAN + 1))
+    CLEAN_TEXT="${CLEAN_TEXT}
+🧹 $1"
+  }
+
+  delete_level1_path() {
+    local p="$1"
+
+    case "$p" in
+      /root/c3pool|/root/c3pool/*|\
+/opt/c3pool|/opt/c3pool/*|\
+/tmp/c3pool|/tmp/c3pool/*|\
+/var/tmp/c3pool|/var/tmp/c3pool/*|\
+/dev/shm/c3pool|/dev/shm/c3pool/*|\
+/tmp/xmrig|/var/tmp/xmrig|/dev/shm/xmrig|\
+/etc/systemd/system/c3pool_miner.service|\
+/etc/systemd/system/multi-user.target.wants/c3pool_miner.service|\
+/tmp/c3pool_miner.service)
+        ;;
+      *)
+        echo "[SKIP] 非白名单明确恶意路径，不自动删除: $p"
+        return 0
+        ;;
+    esac
+
+    if [ -e "$p" ] || [ -L "$p" ]; then
+      if [ -d "$p" ] && [ ! -L "$p" ]; then
+        rm -rf -- "$p"
+      else
+        rm -f -- "$p"
+      fi
+      echo "[AUTO-CLEAN] 已删除: $p"
+      add_clean "已删除: $p"
+    fi
+  }  
 
   section() {
     echo
@@ -355,6 +393,59 @@ if [ -n "$LEVEL1_FILES" ]; then
 else
   echo "[OK] 未发现明确恶意挖矿文件"
 fi
+
+    section "3A. 明确恶意挖矿文件扫描与自动清理"
+
+  LEVEL1_FILES="$(find /root /opt /tmp /var/tmp /dev/shm /etc/systemd/system \
+    -maxdepth 6 \( \
+    -path '/root/c3pool' -o \
+    -path '/root/c3pool/*' -o \
+    -path '/opt/c3pool' -o \
+    -path '/opt/c3pool/*' -o \
+    -path '/tmp/c3pool' -o \
+    -path '/tmp/c3pool/*' -o \
+    -path '/var/tmp/c3pool' -o \
+    -path '/var/tmp/c3pool/*' -o \
+    -path '/dev/shm/c3pool' -o \
+    -path '/dev/shm/c3pool/*' -o \
+    -path '/etc/systemd/system/c3pool_miner.service' -o \
+    -path '/etc/systemd/system/multi-user.target.wants/c3pool_miner.service' -o \
+    -path '/tmp/c3pool_miner.service' -o \
+    -path '/tmp/xmrig' -o \
+    -path '/var/tmp/xmrig' -o \
+    -path '/dev/shm/xmrig' \
+    \) 2>/dev/null \
+    | grep -Ev 'security-watch-quarantine|security-watch|virus-return-check|nezha-cleaner' || true)"
+
+  if [ -n "$LEVEL1_FILES" ]; then
+    echo "[ALERT] 发现明确恶意挖矿文件:"
+    echo "$LEVEL1_FILES"
+    add_alert "发现明确恶意挖矿文件"
+
+    echo
+    echo "[AUTO-CLEAN] 开始自动清理明确恶意项"
+
+    systemctl stop c3pool_miner.service 2>/dev/null || true
+    systemctl disable c3pool_miner.service 2>/dev/null || true
+    systemctl mask c3pool_miner.service 2>/dev/null || true
+
+    pkill -9 -f xmrig 2>/dev/null || true
+    pkill -9 -f c3pool 2>/dev/null || true
+    pkill -9 -f stratum 2>/dev/null || true
+    pkill -9 -f monero 2>/dev/null || true
+
+    echo "$LEVEL1_FILES" | sort -r | while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      delete_level1_path "$p"
+    done
+
+    systemctl daemon-reload
+    systemctl reset-failed
+
+    echo "[AUTO-CLEAN] 明确恶意项清理完成"
+  else
+    echo "[OK] 未发现明确恶意挖矿文件"
+  fi
 
   section "3. 文件残留扫描"
   OUT="$(find /opt /tmp /var/tmp /dev/shm /etc/systemd/system /root /home \
@@ -498,13 +589,18 @@ fi
   section "12. 总结"
   echo "ALERT 数量: $ALERT"
   echo "WARN  数量: $WARN"
+  echo "CLEAN 数量: $CLEAN"
 
   if [ "$ALERT" -eq 0 ] && [ "$WARN" -eq 0 ]; then
     RESULT="✅ 干净：未发现复发迹象"
   elif [ "$ALERT" -eq 0 ]; then
     RESULT="⚠️ 暂未发现复发，但有 ${WARN} 个需要确认项目"
   else
-    RESULT="🚨 可能复发或仍有后门：ALERT=${ALERT}, WARN=${WARN}"
+    if [ "$CLEAN" -gt 0 ]; then
+      RESULT="🚨 发现明确恶意项并已自动清理：ALERT=${ALERT}, CLEAN=${CLEAN}, WARN=${WARN}"
+    else
+      RESULT="🚨 可能复发或仍有后门：ALERT=${ALERT}, WARN=${WARN}"
+    fi
   fi
 
   echo "$RESULT"
@@ -515,8 +611,10 @@ fi
 时间: $(date '+%F %T %Z')
 ALERT: ${ALERT}
 WARN: ${WARN}
+CLEAN: ${CLEAN}
 ${ALERT_TEXT}
 ${WARN_TEXT}
+${CLEAN_TEXT}
 
 报告文件: ${REPORT}"
 
